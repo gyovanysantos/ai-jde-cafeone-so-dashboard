@@ -4,19 +4,19 @@
 // This function proxies JDE AIS REST API calls so that AIS credentials
 // never reach the browser. It:
 //   1. Reads AIS_BASE_URL, AIS_USERNAME, AIS_PASSWORD from SWA app settings
-//   2. Authenticates to JDE AIS via Basic Auth (POST /jderest/v2/tokenrequest)
-//   3. Queries F4211 (Sales Order Detail) for the given order/business unit
-//   4. Normalizes the response into 3 dashboard datasets
-//   5. Logs out the AIS session
-//   6. Returns JSON to the browser
+//   2. Queries F4211 via AIS Data Service in STATELESS mode (creds in each req)
+//   3. Normalizes the response into 3 dashboard datasets
+//   4. Returns JSON to the browser
+//
+// Stateless mode: username+password are sent directly in the dataservice body,
+// avoiding the separate tokenrequest + JSESSIONID cookie round-trip that
+// doesn't work reliably from serverless environments.
 //
 // Query params: ?orderNumber=XXXXX&businessUnit=XXX (both optional)
 // ============================================================================
 
 /**
  * Reads AIS credentials from SWA app settings (environment variables).
- * These are set via: az staticwebapp appsettings set --name <SWA> --setting-names KEY=VALUE
- * They are stored encrypted at rest and never exposed to the browser.
  */
 function getSecrets() {
   const baseUrl = process.env.AIS_BASE_URL;
@@ -33,82 +33,38 @@ function getSecrets() {
 }
 
 /**
- * Authenticates to JDE AIS Server using Basic Auth.
+ * Queries JDE table F4211 (Sales Order Detail) via AIS Data Service in STATELESS mode.
  *
- * JDE AIS endpoint: POST /jderest/v2/tokenrequest
- * Request body requires username, password, and deviceName.
- * Returns a token string used for subsequent API calls.
- *
- * @see https://docs.oracle.com/en/applications/jd-edwards/cross-product/9.2/eoaai/
- */
-async function aisAuthenticate(baseUrl, username, password, signal) {
-  const url = `${baseUrl}/jderest/v2/tokenrequest`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({
-      username,
-      password,
-      deviceName: "CafeOneDashboard",  // Arbitrary device identifier for AIS audit trail
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`AIS authentication failed (${response.status}): ${text}`);
-  }
-
-  const data = await response.json();
-
-  // AIS returns the token in different fields depending on Tools Release version:
-  // - "userInfo.token" (9.2.5+)
-  // - "userInfo.token" nested inside the response
-  const token = data.userInfo?.token;
-  if (!token) {
-    throw new Error("AIS authentication succeeded but no token returned. Check AIS server version.");
-  }
-
-  return token;
-}
-
-/**
- * Queries JDE table F4211 (Sales Order Detail / SO Detail File) via AIS Data Service.
+ * Stateless mode sends username+password directly in the dataservice request body
+ * instead of using a separate token. This avoids JSESSIONID cookie issues in
+ * serverless environments (Azure Functions, SWA managed APIs, etc.).
  *
  * JDE Table: F4211 — Sales Order Detail
- * Key fields queried:
- *   - DOCO  (F4211.DOCO)  — Order Number (Document Order Number)
- *   - MCU   (F4211.MCU)   — Business Unit (Branch/Plant)
- *   - NXTR  (F4211.NXTR)  — Next Status Code (line status in order flow)
- *   - AEXP  (F4211.AEXP)  — Extended Price (amount for the line)
- *   - SHAN  (F4211.SHAN)  — Ship To Address Number (customer)
- *   - LITM  (F4211.LITM)  — 2nd Item Number (usually the short item ID)
- *   - DRQJ  (F4211.DRQJ)  — Date Requested (Julian) — requested ship date
- *   - DSC1  (F4211.DSC1)  — Description Line 1 (item description)
- *
- * AIS endpoint: POST /jderest/v2/dataservice
- *
- * NOTE: If your JDE environment restricts direct F4211 access via AIS dataservice,
- * you'll need to create a JDE Orchestrator that calls P4210/W4210A (Sales Order Entry)
- * and returns the detail grid data. The orchestrator endpoint would be:
- *   POST /jderest/v2/orchestrator/{orchestratorName}
+ * Key fields:
+ *   - DOCO  (F4211.DOCO)  — Order Number
+ *   - MCU   (F4211.MCU)   — Business Unit
+ *   - NXTR  (F4211.NXTR)  — Next Status Code
+ *   - AEXP  (F4211.AEXP)  — Extended Price
+ *   - SHAN  (F4211.SHAN)  — Ship To Address Number
+ *   - LITM  (F4211.LITM)  — 2nd Item Number
+ *   - DRQJ  (F4211.DRQJ)  — Date Requested (Julian)
+ *   - DSC1  (F4211.DSC1)  — Description Line 1
  */
-async function aisQueryOrderLines(baseUrl, token, orderNumber, businessUnit, signal) {
+async function aisQueryOrderLines(baseUrl, username, password, orderNumber, businessUnit, signal) {
   const url = `${baseUrl}/jderest/v2/dataservice`;
 
-  // Build the AIS Data Service request
+  // Stateless request: credentials go in the body (no token needed)
   const requestBody = {
-    token,
-    targetName: "F4211",        // JDE table: Sales Order Detail
+    username,
+    password,
+    targetName: "F4211",
     targetType: "table",
     dataServiceType: "BROWSE",
-    maxPageSize: "500",          // Max rows to return — adjust if needed
+    maxPageSize: "500",
     returnControlIDs: "F4211.DOCO|F4211.NXTR|F4211.AEXP|F4211.SHAN|F4211.LITM|F4211.DRQJ|F4211.DSC1|F4211.MCU",
   };
 
-  // Build query conditions dynamically — only filter when params are provided.
-  // When no orderNumber is given, we fetch ALL rows from F4211 (up to maxPageSize).
+  // Build query conditions dynamically
   const conditions = [];
 
   if (orderNumber) {
@@ -127,7 +83,6 @@ async function aisQueryOrderLines(baseUrl, token, orderNumber, businessUnit, sig
     });
   }
 
-  // Only attach the query block if there are conditions to apply
   if (conditions.length > 0) {
     requestBody.query = { condition: conditions };
   }
@@ -147,27 +102,10 @@ async function aisQueryOrderLines(baseUrl, token, orderNumber, businessUnit, sig
   const data = await response.json();
 
   // AIS returns rows in "fs_DATABROWSE_F4211.data.gridData.rowset"
-  // The exact path may vary by AIS version — adjust if needed
   const rowset =
     data?.fs_DATABROWSE_F4211?.data?.gridData?.rowset || [];
 
   return rowset;
-}
-
-/**
- * Logs out the AIS session to free server resources.
- * JDE AIS endpoint: POST /jderest/v2/tokenrequest/logout
- */
-async function aisLogout(baseUrl, token) {
-  try {
-    await fetch(`${baseUrl}/jderest/v2/tokenrequest/logout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-  } catch {
-    // Logout failure is non-critical — AIS sessions time out automatically
-  }
 }
 
 /**
@@ -262,26 +200,23 @@ module.exports = async function (context, req) {
   // 10-second timeout for the entire AIS round-trip
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
-  let token = null;
 
   try {
     // 1. Get AIS credentials from app settings
     const secrets = getSecrets();
     const { baseUrl, username, password } = secrets;
 
-    // 2. Authenticate to AIS
-    token = await aisAuthenticate(baseUrl, username, password, controller.signal);
-
-    // 3. Query F4211
+    // 2. Query F4211 in stateless mode (credentials in request body)
     const rowset = await aisQueryOrderLines(
       baseUrl,
-      token,
+      username,
+      password,
       orderNumber,
       businessUnit,
       controller.signal
     );
 
-    // 4. Normalize into dashboard datasets
+    // 3. Normalize into dashboard datasets
     const dashboardData = normalizeData(rowset);
 
     context.res = {
@@ -312,15 +247,5 @@ module.exports = async function (context, req) {
     };
   } finally {
     clearTimeout(timeout);
-
-    // 5. Always logout AIS session
-    if (token) {
-      try {
-        const secrets = getSecrets();
-        await aisLogout(secrets.baseUrl, token);
-      } catch {
-        // Non-critical
-      }
-    }
   }
 };
