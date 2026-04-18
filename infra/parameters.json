@@ -12,13 +12,13 @@
       "value": "kv-jde-cafeone-so"
     },
     "repositoryUrl": {
-      "value": "https://github.com/YOUR_ORG/ai-jde-cafeone-so-dashboard"
+      "value": "https://github.com/gyovanysantos/ai-jde-cafeone-so-dashboard"
     },
     "repositoryBranch": {
-      "value": "main"
+      "value": "master"
     },
     "staticWebAppSku": {
-      "value": "Free"
+      "value": "Standard"
     },
     "keyVaultAdminObjectId": {
       "value": ""

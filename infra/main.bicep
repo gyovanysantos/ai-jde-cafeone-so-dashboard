@@ -23,22 +23,25 @@ param staticWebAppName string = 'swa-jde-cafeone-so-dashboard'
 param keyVaultName string = 'kv-jde-cafeone-so'
 
 @description('GitHub repository URL (HTTPS)')
-param repositoryUrl string = 'https://github.com/YOUR_ORG/ai-jde-cafeone-so-dashboard'
+param repositoryUrl string = 'https://github.com/gyovanysantos/ai-jde-cafeone-so-dashboard'
 
 @description('GitHub branch to deploy from')
 param repositoryBranch string = 'main'
 
 @description('SKU for the Static Web App')
 @allowed(['Free', 'Standard'])
-param staticWebAppSku string = 'Free'
+param staticWebAppSku string = 'Standard'
 
 @description('Object ID of the user or service principal that should get Key Vault admin access')
 param keyVaultAdminObjectId string = ''
 
+@description('Set to true to create RBAC role assignments (requires Microsoft.Authorization/roleAssignments/write permission)')
+param deployRbac bool = false
+
 // ============================================================================
 // 1. Azure Static Web App
 // ============================================================================
-resource staticWebApp 'Microsoft.Web/staticSites@2023-12-01' = {
+resource staticWebApp 'Microsoft.Web/staticSites@2022-09-01' = {
   name: staticWebAppName
   location: location
   sku: {
@@ -72,11 +75,20 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
       name: 'standard'
     }
     tenantId: subscription().tenantId
-    // Use Azure RBAC for access control (recommended over access policies)
-    enableRbacAuthorization: true
+    // Use RBAC if deployRbac=true, otherwise fall back to access policies
+    enableRbacAuthorization: deployRbac
+    accessPolicies: deployRbac ? [] : [
+      {
+        tenantId: subscription().tenantId
+        objectId: staticWebApp.identity.principalId
+        permissions: {
+          secrets: ['get', 'list']
+        }
+      }
+    ]
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false  // Allow purge in dev/hackathon — enable in production
+    enablePurgeProtection: true  // Cannot be disabled once enabled
   }
 }
 
@@ -87,7 +99,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 // This lets the Azure Function read secrets but not modify them
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 
-resource swaKeyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource swaKeyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployRbac) {
   name: guid(keyVault.id, staticWebApp.id, keyVaultSecretsUserRoleId)
   scope: keyVault
   properties: {
@@ -103,7 +115,7 @@ resource swaKeyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022
 // Grants the deploying user "Key Vault Administrator" so they can set secrets
 var keyVaultAdminRoleId = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 
-resource adminKeyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(keyVaultAdminObjectId)) {
+resource adminKeyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployRbac && !empty(keyVaultAdminObjectId)) {
   name: guid(keyVault.id, keyVaultAdminObjectId, keyVaultAdminRoleId)
   scope: keyVault
   properties: {
