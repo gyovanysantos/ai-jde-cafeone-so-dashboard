@@ -83,9 +83,17 @@ async function aisQueryOrderLines(baseUrl, username, password, orderNumber, busi
     });
   }
 
-  if (conditions.length > 0) {
-    requestBody.query = { condition: conditions };
+  // JDE AIS Data Browser returns 0 rows when no filter is provided (security design).
+  // When no specific filters are given, use DOCO > 0 to fetch all sales order lines.
+  if (conditions.length === 0) {
+    conditions.push({
+      value: [{ content: "0", specialValueId: "LITERAL" }],
+      controlId: "F4211.DOCO",
+      operator: "GREATER",
+    });
   }
+
+  requestBody.query = { condition: conditions };
 
   const response = await fetch(url, {
     method: "POST",
