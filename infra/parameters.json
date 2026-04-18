@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus2"
+    },
+    "staticWebAppName": {
+      "value": "swa-jde-cafeone-so-dashboard"
+    },
+    "keyVaultName": {
+      "value": "kv-jde-cafeone-so"
+    },
+    "repositoryUrl": {
+      "value": "https://github.com/YOUR_ORG/ai-jde-cafeone-so-dashboard"
+    },
+    "repositoryBranch": {
+      "value": "main"
+    },
+    "staticWebAppSku": {
+      "value": "Free"
+    },
+    "keyVaultAdminObjectId": {
+      "value": ""
+    }
+  }
+}

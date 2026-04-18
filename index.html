@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sales Order Dashboard</title>
+
+  <!-- Chart.js from CDN — only load what we need -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* ====================================================================
+       CaféOne Dashboard — Scoped CSS
+       Max viewport ~900px (JDE CaféOne iFrame)
+       Color palette: neutral whites/grays + JDE blue accent #1a6496
+       ==================================================================== */
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f5f6f8;
+      color: #333;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    /* --- Header Bar --- */
+    .header {
+      background: #1a6496;
+      color: #fff;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header h1 {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-refresh {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+
+    .btn-refresh:hover {
+      background: rgba(255,255,255,0.25);
+    }
+
+    .btn-refresh:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .line-count {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    /* --- Dashboard Grid --- */
+    .dashboard {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .card-full {
+      grid-column: 1 / -1;
+    }
+
+    .card-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid #eee;
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a6496;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-body {
+      padding: 14px;
+      min-height: 200px;
+      position: relative;
+    }
+
+    .card-body canvas {
+      width: 100% !important;
+      max-height: 260px;
+    }
+
+    /* --- Loading Spinner --- */
+    .spinner-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 180px;
+      gap: 10px;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #1a6496;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner-text {
+      color: #888;
+      font-size: 11px;
+    }
+
+    /* --- Error State --- */
+    .error-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 180px;
+      gap: 8px;
+      color: #e74c3c;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .error-state .error-icon {
+      font-size: 28px;
+    }
+
+    .error-state .error-msg {
+      font-size: 12px;
+      color: #666;
+    }
+
+    /* --- Mock Data Watermark --- */
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-20deg);
+      font-size: 18px;
+      font-weight: 700;
+      color: rgba(26, 100, 150, 0.08);
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    .mock-badge {
+      display: inline-block;
+      background: #fff3cd;
+      color: #856404;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    /* --- Table Styles --- */
+    .amount-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .amount-table th {
+      text-align: left;
+      padding: 6px 8px;
+      background: #f8f9fa;
+      border-bottom: 2px solid #dee2e6;
+      font-weight: 600;
+      color: #555;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .amount-table th.sortable {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .amount-table th.sortable:hover {
+      color: #1a6496;
+    }
+
+    .amount-table th.sort-asc::after {
+      content: " ▲";
+      font-size: 9px;
+    }
+
+    .amount-table th.sort-desc::after {
+      content: " ▼";
+      font-size: 9px;
+    }
+
+    .amount-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .amount-table tbody tr:hover {
+      background: #f0f7fc;
+    }
+
+    .cell-item {
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 11px;
+      color: #1a6496;
+      font-weight: 600;
+    }
+
+    .cell-desc {
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .cell-shipto {
+      text-align: center;
+      color: #666;
+    }
+
+    .cell-amount {
+      position: relative;
+      min-width: 120px;
+    }
+
+    .amount-value {
+      position: relative;
+      z-index: 2;
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .amount-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: rgba(26, 100, 150, 0.08);
+      border-radius: 2px;
+      z-index: 1;
+      transition: width 0.3s ease;
+    }
+
+    .no-data {
+      text-align: center;
+      color: #888;
+      padding: 40px;
+      font-style: italic;
+    }
+
+    /* --- Responsive --- */
+    @media (max-width: 600px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+      }
+
+      .card-full {
+        grid-column: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ====================================================================
+       Header Bar
+       Shows order number when connected, "Overview" in default mode
+       ==================================================================== -->
+  <header class="header">
+    <h1 id="pageTitle">Sales Order Dashboard — Overview</h1>
+    <div class="header-actions">
+      <span class="line-count" id="lineCount"></span>
+      <button class="btn-refresh" id="btnRefresh" title="Refresh data">
+        ↻ Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- ====================================================================
+       Dashboard Grid
+       Row 1: Pie chart (left) + Table (right)
+       Row 2: Bar chart (full width)
+       ==================================================================== -->
+  <main class="dashboard">
+
+    <!-- Card 1: Orders by Status (Pie Chart) -->
+    <div class="card" id="cardStatus">
+      <div class="card-header">
+        <span>🥧</span> Orders by Status
+        <span class="mock-badge" id="badgeStatus" style="display:none;">SAMPLE DATA</span>
+      </div>
+      <div class="card-body" id="bodyStatus">
+        <div class="spinner-container">
+          <div class="spinner"></div>
+          <span class="spinner-text">Loading status data…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 2: Order Amount by Item (Table) -->
+    <div class="card" id="cardTable">
+      <div class="card-header">
+        <span>📊</span> Amount by Item (Top 10)
+        <span class="mock-badge" id="badgeTable" style="display:none;">SAMPLE DATA</span>
+      </div>
+      <div class="card-body" id="bodyTable" style="padding: 0;">
+        <div class="spinner-container">
+          <div class="spinner"></div>
+          <span class="spinner-text">Loading item data…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: Orders by Ship Date (Bar Chart) -->
+    <div class="card card-full" id="cardShipDate">
+      <div class="card-header">
+        <span>📅</span> Amount by Requested Ship Date (±30 days)
+        <span class="mock-badge" id="badgeShipDate" style="display:none;">SAMPLE DATA</span>
+      </div>
+      <div class="card-body" id="bodyShipDate">
+        <div class="spinner-container">
+          <div class="spinner"></div>
+          <span class="spinner-text">Loading ship date data…</span>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ====================================================================
+       Main Application Script (ES6 Module)
+       ==================================================================== -->
+  <script type="module">
+    import { fetchDashboardData } from "./js/api.js";
+    import { mockStatusData, mockItemAmountData, generateMockShipDateData } from "./js/mockData.js";
+    import { renderStatusPieChart, renderShipDateBarChart } from "./js/charts.js";
+    import { renderAmountTable } from "./js/tables.js";
+
+    // ---- Parse URL Parameters ----
+    // JDE CaféOne passes these when the user clicks the form button:
+    //   ?orderNumber=12345&businessUnit=M30
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderNumber = urlParams.get("orderNumber");
+    const businessUnit = urlParams.get("businessUnit") || "";
+    const isLiveMode = !!orderNumber;
+
+    // ---- Update Page Title ----
+    const pageTitle = document.getElementById("pageTitle");
+    if (isLiveMode) {
+      pageTitle.textContent = `Sales Order Dashboard — Order #${orderNumber}`;
+      document.title = `SO Dashboard — #${orderNumber}`;
+    }
+
+    // ---- Helper: Show Loading Spinner ----
+    function showLoading(bodyId) {
+      document.getElementById(bodyId).innerHTML = `
+        <div class="spinner-container">
+          <div class="spinner"></div>
+          <span class="spinner-text">Fetching from JDE AIS…</span>
+        </div>`;
+    }
+
+    // ---- Helper: Show Error State ----
+    function showError(bodyId, message) {
+      document.getElementById(bodyId).innerHTML = `
+        <div class="error-state">
+          <span class="error-icon">⚠️</span>
+          <strong>Failed to load data</strong>
+          <span class="error-msg">${message}</span>
+        </div>`;
+    }
+
+    // ---- Helper: Show/hide mock badges ----
+    function toggleMockBadges(show) {
+      document.getElementById("badgeStatus").style.display = show ? "inline-block" : "none";
+      document.getElementById("badgeTable").style.display = show ? "inline-block" : "none";
+      document.getElementById("badgeShipDate").style.display = show ? "inline-block" : "none";
+    }
+
+    // ---- Render Dashboards with Mock Data ----
+    function renderMockDashboards() {
+      toggleMockBadges(true);
+      document.getElementById("lineCount").textContent = "";
+
+      // Prepare canvas for pie chart
+      document.getElementById("bodyStatus").innerHTML =
+        '<div class="watermark">Connect to JDE</div><canvas id="chartStatus"></canvas>';
+      renderStatusPieChart("chartStatus", mockStatusData);
+
+      // Table
+      document.getElementById("bodyTable").innerHTML = '<div id="tableContainer"></div>';
+      renderAmountTable("tableContainer", mockItemAmountData);
+
+      // Bar chart
+      const mockShipDates = generateMockShipDateData();
+      document.getElementById("bodyShipDate").innerHTML = '<canvas id="chartShipDate"></canvas>';
+      renderShipDateBarChart("chartShipDate", mockShipDates);
+    }
+
+    // ---- Render Dashboards with Live Data ----
+    async function renderLiveDashboards() {
+      toggleMockBadges(false);
+
+      // Show loading spinners on all cards simultaneously
+      showLoading("bodyStatus");
+      showLoading("bodyTable");
+      showLoading("bodyShipDate");
+
+      const btnRefresh = document.getElementById("btnRefresh");
+      btnRefresh.disabled = true;
+
+      try {
+        // Single API call returns data for all 3 dashboards
+        const data = await fetchDashboardData(orderNumber, businessUnit);
+
+        // Update line count in header
+        document.getElementById("lineCount").textContent =
+          `${data.lineCount} line${data.lineCount !== 1 ? "s" : ""}`;
+
+        // Render all 3 dashboards in parallel (DOM updates are synchronous but fast)
+        await Promise.all([
+          renderStatusCard(data.statusData),
+          renderTableCard(data.itemAmountData),
+          renderShipDateCard(data.shipDateData),
+        ]);
+      } catch (err) {
+        // If the main API call fails, show error on all cards
+        showError("bodyStatus", err.message);
+        showError("bodyTable", err.message);
+        showError("bodyShipDate", err.message);
+      } finally {
+        btnRefresh.disabled = false;
+      }
+    }
+
+    // Individual card renderers (wrapped in async for Promise.all)
+    async function renderStatusCard(statusData) {
+      try {
+        if (!statusData || statusData.length === 0) {
+          showError("bodyStatus", "No status data returned for this order.");
+          return;
+        }
+        document.getElementById("bodyStatus").innerHTML = '<canvas id="chartStatus"></canvas>';
+        renderStatusPieChart("chartStatus", statusData);
+      } catch (err) {
+        showError("bodyStatus", err.message);
+      }
+    }
+
+    async function renderTableCard(itemAmountData) {
+      try {
+        document.getElementById("bodyTable").innerHTML = '<div id="tableContainer"></div>';
+        renderAmountTable("tableContainer", itemAmountData);
+      } catch (err) {
+        showError("bodyTable", err.message);
+      }
+    }
+
+    async function renderShipDateCard(shipDateData) {
+      try {
+        if (!shipDateData || shipDateData.length === 0) {
+          showError("bodyShipDate", "No ship date data returned for this order.");
+          return;
+        }
+        document.getElementById("bodyShipDate").innerHTML = '<canvas id="chartShipDate"></canvas>';
+        renderShipDateBarChart("chartShipDate", shipDateData);
+      } catch (err) {
+        showError("bodyShipDate", err.message);
+      }
+    }
+
+    // ---- Refresh Button ----
+    document.getElementById("btnRefresh").addEventListener("click", () => {
+      if (isLiveMode) {
+        renderLiveDashboards();
+      } else {
+        renderMockDashboards();
+      }
+    });
+
+    // ---- Initial Load ----
+    if (isLiveMode) {
+      renderLiveDashboards();
+    } else {
+      renderMockDashboards();
+    }
+  </script>
+
+</body>
+</html>
