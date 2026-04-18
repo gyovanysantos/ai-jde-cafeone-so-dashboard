@@ -3,52 +3,33 @@
 // ============================================================================
 // This function proxies JDE AIS REST API calls so that AIS credentials
 // never reach the browser. It:
-//   1. Reads AIS_BASE_URL, AIS_USERNAME, AIS_PASSWORD from Azure Key Vault
+//   1. Reads AIS_BASE_URL, AIS_USERNAME, AIS_PASSWORD from SWA app settings
 //   2. Authenticates to JDE AIS via Basic Auth (POST /jderest/v2/tokenrequest)
 //   3. Queries F4211 (Sales Order Detail) for the given order/business unit
 //   4. Normalizes the response into 3 dashboard datasets
 //   5. Logs out the AIS session
 //   6. Returns JSON to the browser
 //
-// Query params: ?orderNumber=XXXXX&businessUnit=XXX
+// Query params: ?orderNumber=XXXXX&businessUnit=XXX (both optional)
 // ============================================================================
 
-const { DefaultAzureCredential } = require("@azure/identity");
-const { SecretClient } = require("@azure/keyvault-secrets");
-
-// Cache secrets in memory for the lifetime of the function instance
-// to avoid repeated Key Vault calls on every request
-let cachedSecrets = null;
-
 /**
- * Reads AIS credentials from Azure Key Vault.
- * Uses DefaultAzureCredential which works with SWA managed identity in Azure
- * and with az login / environment variables locally.
+ * Reads AIS credentials from SWA app settings (environment variables).
+ * These are set via: az staticwebapp appsettings set --name <SWA> --setting-names KEY=VALUE
+ * They are stored encrypted at rest and never exposed to the browser.
  */
-async function getSecrets() {
-  if (cachedSecrets) return cachedSecrets;
+function getSecrets() {
+  const baseUrl = process.env.AIS_BASE_URL;
+  const username = process.env.AIS_USERNAME;
+  const password = process.env.AIS_PASSWORD;
 
-  const keyVaultUri = process.env.KEY_VAULT_URI;
-  if (!keyVaultUri) {
-    throw new Error("KEY_VAULT_URI environment variable is not set. Configure it in SWA app settings.");
+  if (!baseUrl || !username || !password) {
+    throw new Error(
+      "Missing AIS credentials. Set AIS_BASE_URL, AIS_USERNAME, AIS_PASSWORD in SWA app settings."
+    );
   }
 
-  const credential = new DefaultAzureCredential();
-  const client = new SecretClient(keyVaultUri, credential);
-
-  const [baseUrlSecret, usernameSecret, passwordSecret] = await Promise.all([
-    client.getSecret("AIS-BASE-URL"),
-    client.getSecret("AIS-USERNAME"),
-    client.getSecret("AIS-PASSWORD"),
-  ]);
-
-  cachedSecrets = {
-    baseUrl: baseUrlSecret.value,
-    username: usernameSecret.value,
-    password: passwordSecret.value,
-  };
-
-  return cachedSecrets;
+  return { baseUrl, username, password };
 }
 
 /**
@@ -284,8 +265,8 @@ module.exports = async function (context, req) {
   let token = null;
 
   try {
-    // 1. Get AIS credentials from Key Vault
-    const secrets = await getSecrets();
+    // 1. Get AIS credentials from app settings
+    const secrets = getSecrets();
     const { baseUrl, username, password } = secrets;
 
     // 2. Authenticate to AIS
@@ -335,7 +316,7 @@ module.exports = async function (context, req) {
     // 5. Always logout AIS session
     if (token) {
       try {
-        const secrets = await getSecrets();
+        const secrets = getSecrets();
         await aisLogout(secrets.baseUrl, token);
       } catch {
         // Non-critical
