@@ -381,7 +381,6 @@
        ==================================================================== -->
   <script type="module">
     import { fetchDashboardData } from "./js/api.js";
-    import { mockStatusData, mockItemAmountData, generateMockShipDateData } from "./js/mockData.js";
     import { renderStatusPieChart, renderShipDateBarChart } from "./js/charts.js";
     import { renderAmountTable } from "./js/tables.js";
 
@@ -389,13 +388,12 @@
     // JDE CaféOne passes these when the user clicks the form button:
     //   ?orderNumber=12345&businessUnit=M30
     const urlParams = new URLSearchParams(window.location.search);
-    const orderNumber = urlParams.get("orderNumber");
+    const orderNumber = urlParams.get("orderNumber") || "";
     const businessUnit = urlParams.get("businessUnit") || "";
-    const isLiveMode = !!orderNumber;
 
     // ---- Update Page Title ----
     const pageTitle = document.getElementById("pageTitle");
-    if (isLiveMode) {
+    if (orderNumber) {
       pageTitle.textContent = `Sales Order Dashboard — Order #${orderNumber}`;
       document.title = `SO Dashboard — #${orderNumber}`;
     }
@@ -426,27 +424,8 @@
       document.getElementById("badgeShipDate").style.display = show ? "inline-block" : "none";
     }
 
-    // ---- Render Dashboards with Mock Data ----
-    function renderMockDashboards() {
-      toggleMockBadges(true);
-      document.getElementById("lineCount").textContent = "";
-
-      // Prepare canvas for pie chart
-      document.getElementById("bodyStatus").innerHTML =
-        '<div class="watermark">Connect to JDE</div><canvas id="chartStatus"></canvas>';
-      renderStatusPieChart("chartStatus", mockStatusData);
-
-      // Table
-      document.getElementById("bodyTable").innerHTML = '<div id="tableContainer"></div>';
-      renderAmountTable("tableContainer", mockItemAmountData);
-
-      // Bar chart
-      const mockShipDates = generateMockShipDateData();
-      document.getElementById("bodyShipDate").innerHTML = '<canvas id="chartShipDate"></canvas>';
-      renderShipDateBarChart("chartShipDate", mockShipDates);
-    }
-
-    // ---- Render Dashboards with Live Data ----
+    // ---- Render Dashboards with Live AIS Data ----
+    // Called on initial load (no filters = fetch all) AND when URL has orderNumber
     async function renderLiveDashboards() {
       toggleMockBadges(false);
 
@@ -460,6 +439,7 @@
 
       try {
         // Single API call returns data for all 3 dashboards
+        // If orderNumber is empty, the API fetches ALL F4211 rows
         const data = await fetchDashboardData(orderNumber, businessUnit);
 
         // Update line count in header
@@ -520,19 +500,11 @@
 
     // ---- Refresh Button ----
     document.getElementById("btnRefresh").addEventListener("click", () => {
-      if (isLiveMode) {
-        renderLiveDashboards();
-      } else {
-        renderMockDashboards();
-      }
+      renderLiveDashboards();
     });
 
-    // ---- Initial Load ----
-    if (isLiveMode) {
-      renderLiveDashboards();
-    } else {
-      renderMockDashboards();
-    }
+    // ---- Initial Load — always fetch real data from AIS ----
+    renderLiveDashboards();
   </script>
 
 </body>

@@ -122,27 +122,33 @@ async function aisQueryOrderLines(baseUrl, token, orderNumber, businessUnit, sig
     targetName: "F4211",        // JDE table: Sales Order Detail
     targetType: "table",
     dataServiceType: "BROWSE",
-    maxPageSize: "500",          // Max lines per order — adjust if orders can have more
+    maxPageSize: "500",          // Max rows to return — adjust if needed
     returnControlIDs: "F4211.DOCO|F4211.NXTR|F4211.AEXP|F4211.SHAN|F4211.LITM|F4211.DRQJ|F4211.DSC1|F4211.MCU",
-    query: {
-      condition: [
-        {
-          value: [{ content: orderNumber, specialValueId: "LITERAL" }],
-          controlId: "F4211.DOCO",
-          operator: "EQUAL",
-        },
-      ],
-    },
   };
 
-  // Only add business unit filter if provided
-  // (some JDE setups use a single BU, making this optional)
+  // Build query conditions dynamically — only filter when params are provided.
+  // When no orderNumber is given, we fetch ALL rows from F4211 (up to maxPageSize).
+  const conditions = [];
+
+  if (orderNumber) {
+    conditions.push({
+      value: [{ content: orderNumber, specialValueId: "LITERAL" }],
+      controlId: "F4211.DOCO",
+      operator: "EQUAL",
+    });
+  }
+
   if (businessUnit) {
-    requestBody.query.condition.push({
+    conditions.push({
       value: [{ content: businessUnit, specialValueId: "LITERAL" }],
       controlId: "F4211.MCU",
       operator: "EQUAL",
     });
+  }
+
+  // Only attach the query block if there are conditions to apply
+  if (conditions.length > 0) {
+    requestBody.query = { condition: conditions };
   }
 
   const response = await fetch(url, {
@@ -257,23 +263,11 @@ function normalizeData(rowset) {
 // Main Azure Function handler
 // ============================================================================
 module.exports = async function (context, req) {
-  const orderNumber = req.query.orderNumber;
+  const orderNumber = req.query.orderNumber || "";
   const businessUnit = req.query.businessUnit || "";
 
-  // Validate input
-  if (!orderNumber) {
-    context.res = {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        error: "Missing required query parameter: orderNumber",
-      }),
-    };
-    return;
-  }
-
-  // Sanitize: orderNumber should be numeric (JDE DOCO is always numeric)
-  if (!/^\d+$/.test(orderNumber)) {
+  // Sanitize: if orderNumber is provided, it must be numeric (JDE DOCO is always numeric)
+  if (orderNumber && !/^\d+$/.test(orderNumber)) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json" },

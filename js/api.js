@@ -14,13 +14,16 @@
  * @returns {Promise<{statusData, itemAmountData, shipDateData, lineCount}>}
  * @throws {Error} with a user-friendly message on failure
  */
-export async function fetchDashboardData(orderNumber, businessUnit = "") {
+export async function fetchDashboardData(orderNumber = "", businessUnit = "") {
   // 10-second timeout — matches the Azure Function's internal timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const params = new URLSearchParams({ orderNumber });
+    const params = new URLSearchParams();
+    if (orderNumber) {
+      params.set("orderNumber", orderNumber);
+    }
     if (businessUnit) {
       params.set("businessUnit", businessUnit);
     }

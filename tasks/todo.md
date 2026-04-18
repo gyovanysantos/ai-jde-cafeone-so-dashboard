@@ -21,12 +21,18 @@
 - [x] Create `README.md` — Deploy guide + JDE P98CAFE registration
 
 ## Phase 5: Verification
-- [ ] Open index.html locally — mock data renders all 3 cards
-- [ ] Table columns are sortable (click headers)
-- [ ] Chart.js loads from CDN successfully
-- [ ] Resize to 900px — layout stays clean
-- [ ] Deploy to Azure — SWA URL loads correctly
+- [x] Open index.html locally — mock data renders all 3 cards
+- [x] Table columns are sortable (click headers)
+- [x] Chart.js loads from CDN successfully
+- [x] Resize to 900px — layout stays clean
+- [x] Deploy to Azure — SWA URL loads correctly
 - [ ] Set Key Vault secrets — live data flows through
 
 ## Review Notes
-_To be filled after verification_
+- Bicep needed `Standard` SKU (not `Free`) for hackathon subscription
+- RBAC role assignments require elevated permissions; used access policies fallback
+- Key Vault purge protection is irreversible once enabled
+- SWA CLI local deploy silently failed; GitHub Actions workflow was the reliable path
+- SWA CLI corrupted `.git` directory (deleted objects); had to reinitialize
+- SWA live at: https://yellow-grass-05f04400f.7.azurestaticapps.net
+- Key Vault URI: https://kv-jde-cafeone-so.vault.azure.net/
